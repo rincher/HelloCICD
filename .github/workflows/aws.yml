@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  AWS_REGION: ap-northeast-2           # 사용할 AWS 리전
+  AWS_REGION: us-east-1           # 사용할 AWS 리전
   ECR_REPOSITORY: helloapp             # ECR 리포지토리 이름
   ECS_CLUSTER: hellocluster            # ECS 클러스터 이름
   ECS_SERVICE: helloservice            # ECS 서비스 이름
