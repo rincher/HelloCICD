@@ -79,12 +79,19 @@ jobs:
           task-definition: current-task-def.json
           container-name:  ${{ env.CONTAINER_NAME }}
           image:           ${{ steps.build-image.outputs.image }}
-
-      # 9) ECS에 배포
+      
+      # 9) Remove unsupported `enableFaultInjection` field
+      - name: Filter out enableFaultInjection
+        run: |
+          echo "${{ steps.task-def.outputs.task-definition }}" > raw-task-def.json
+          jq 'del(.enableFaultInjection)' raw-task-def.json > filtered-task-def.json
+          echo "filtered-task-def.json is ready"
+      
+      # 10) Deploy to Amazon ECS using filtered definition
       - name: Deploy to Amazon ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          service:                         ${{ env.ECS_SERVICE }}
-          cluster:                         ${{ env.ECS_CLUSTER }}
-          task-definition:                 ${{ steps.task-def.outputs.task-definition }}
-          wait-for-service-stability:      true
+          service:                    ${{ env.ECS_SERVICE }}
+          cluster:                    ${{ env.ECS_CLUSTER }}
+          task-definition:            file://filtered-task-def.json
+          wait-for-service-stability: true
