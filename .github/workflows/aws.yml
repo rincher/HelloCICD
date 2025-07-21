@@ -62,16 +62,7 @@ jobs:
           docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      # 7) (추가) 기존 Task Definition 내려받기
-      - name: Fetch current Task Definition from ECS
-        id: get-task-def
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition ${{ env.ECS_TASK_DEFINITION }} \
-            --query 'taskDefinition' \
-            --output json > current-task-def.json
-
-      # 8) 새 이미지로 Task Definition 렌더링
+      # 7) 새 이미지로 Task Definition 렌더링
       - name: Render new Task Definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -80,14 +71,7 @@ jobs:
           container-name:  ${{ env.CONTAINER_NAME }}
           image:           ${{ steps.build-image.outputs.image }}
       
-      # 9) Remove unsupported `enableFaultInjection` field
-      - name: Filter out enableFaultInjection
-        run: |
-          echo "${{ steps.task-def.outputs.task-definition }}" > raw-task-def.json
-          jq 'del(.enableFaultInjection)' raw-task-def.json > filtered-task-def.json
-          echo "filtered-task-def.json is ready"
-      
-      # 10) Deploy to Amazon ECS using filtered definition
+      # 8) Deploy to Amazon ECS using filtered definition
       - name: Deploy to Amazon ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
