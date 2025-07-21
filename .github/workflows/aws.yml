@@ -46,13 +46,25 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      # 5) Jib으로 이미지 빌드·푸시 (Dockerfile 불필요)
-      - name: Build & Push Image with Jib
+      # 5) Build
+      - name: build gradle
+        run: ./gradlew clean build
+  
+      # 5) Build, tag, and push image to ECR
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: $
+          SERVICE_TAG: . # Dockerfile의 경로
+          IMAGE_TAG: $ # Github가 제공하는 SHA 암호화 사용
         run: |
-          IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-          ./gradlew jib \
-            -Djib.to.image=$IMAGE_URI
-
+          # Build a docker container and
+          # push it to ECR so that it can
+          # be deployed to ECS.
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_NAME:$IMAGE_TAG $SERVICE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_NAME:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY_NAME:$IMAGE_TAG"
+          
       # 6) 새 이미지 ID로 Task Definition 렌더링
       - name: Render new Task Definition
         id: task-def
