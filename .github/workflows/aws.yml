@@ -69,7 +69,7 @@ jobs:
         run: |
           aws ecs describe-task-definition \
             --task-definition ${{ env.ECS_TASK_DEFINITION }} \
-            --query 'taskDefinition'
+            --query 'taskDefinition' \
             --output json > task-definition.json
 
       # 8) 새 이미지 ID로 Task Definition 렌더링
