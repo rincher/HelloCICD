@@ -10,7 +10,7 @@ env:
   ECR_REPOSITORY: helloapp        # ECR 리포지토리 이름
   ECS_CLUSTER: hellocluster       # ECS 클러스터 이름
   ECS_SERVICE: helloservice       # ECS 서비스 이름
-  ECS_TASK_DEFINITION: hellotask  # ECS에 등록된 Task Definition 이름(또는 ARN)
+  ECS_TASK_DEFINITION: hellotask-revision1.json  # ECS에 등록된 Task Definition 이름(또는 ARN)
   CONTAINER_NAME: helloapp        # Task Definition 내 컨테이너 이름
 
 permissions:
@@ -63,19 +63,18 @@ jobs:
           echo "image=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
       # 7) 새 이미지로 Task Definition 렌더링
-      - name: Render new Task Definition
+      - name: Fill in the new image ID in the Amazon ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: current-task-def.json
-          container-name:  ${{ env.CONTAINER_NAME }}
-          image:           ${{ steps.build-image.outputs.image }}
-      
-      # 8) Deploy to Amazon ECS using filtered definition
-      - name: Deploy to Amazon ECS
+          task-definition: ${{ env.ECS_TASK_DEFINITION }}
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+        
+      - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          service:                    ${{ env.ECS_SERVICE }}
-          cluster:                    ${{ env.ECS_CLUSTER }}
-          task-definition:            file://filtered-task-def.json
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
