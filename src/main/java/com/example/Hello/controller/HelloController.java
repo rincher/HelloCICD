@@ -10,4 +10,10 @@ public class HelloController {
     public ResponseEntity<?> returnHello(){
         return ResponseEntity.ok("Hello You");
     }
+
+   @GetMapping("/")
+    public ResponseEntity<?> healthCheck(){
+        return ResponseEntity.ok("Cake is a like");
+    }
 }
+
