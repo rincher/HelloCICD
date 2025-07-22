@@ -15,5 +15,15 @@ public class HelloController {
     public ResponseEntity<?> healthCheck(){
         return ResponseEntity.ok("Cake is a like");
     }
+
+    @GetMapping("/help")
+    public ResponseEntity<?> askHelp(){
+        return ResponseEntity.ok("Look around");
+    }
+
+    @GetMapping("/unstuck")
+    public ResponseEntity<?> teleport(){
+        return ResponseEntity.ok("Look what you made me do?!");
+    }
 }
 
