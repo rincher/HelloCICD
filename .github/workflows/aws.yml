@@ -83,7 +83,7 @@ jobs:
 
       # 9) ECS 서비스에 배포
       - name: Deploy Amazon ECS task definition
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v3
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-task-def.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
