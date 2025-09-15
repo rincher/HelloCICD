@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: Hello
+  profiles:
+    active: local
+
+aws:
+  region: us-east-1
+  assume-role:
+    arn: "arn:aws:iam::009215122583:role/AWSAdministratorAccess"
+    session-name: "tempSession"
