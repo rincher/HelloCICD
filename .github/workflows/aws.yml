@@ -92,7 +92,7 @@ jobs:
           echo "블루/그린 배포 상태를 모니터링합니다..."
           echo "예상 소요 시간: Health Check Grace Period(1분) + Bake Time(3분) + 여유 시간"
 
-          MAX_ATTEMPTS=90
+          MAX_ATTEMPTS=24
           ATTEMPT=0
           POLL_INTERVAL=10
 
