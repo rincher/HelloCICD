@@ -5,14 +5,17 @@ on:
     branches:
       - main
 
+concurrency:
+  group: deploy-ecs-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
-  AWS_REGION: us-east-1           # 사용할 AWS 리전
-  ECR_REPOSITORY: helloapp        # ECR 리포지토리 이름
-  ECS_CLUSTER: hellocluster       # ECS 클러스터 이름
-  ECS_SERVICE: helloservice       # ECS 서비스 이름
-  # Task Definition 이름을 “family” 또는 전체 ARN으로 설정
-  ECS_TASK_DEFINITION: hellotask   # 기존에 등록된 Task Definition family name
-  CONTAINER_NAME: helloapp        # Task Definition 내 컨테이너 이름
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: helloapp
+  ECS_CLUSTER: hellocluster
+  ECS_SERVICE: helloservice
+  ECS_TASK_DEFINITION: hellotask
+  CONTAINER_NAME: helloapp
 
 permissions:
   contents: read
@@ -21,13 +24,10 @@ permissions:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-
     steps:
-      # 1) 코드 체크아웃
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2) JDK 설치 및 Gradle 캐시
       - name: Set up JDK 17 and cache Gradle
         uses: actions/setup-java@v3
         with:
@@ -35,60 +35,126 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # 3) AWS 자격 증명 설정
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/githuboidc # replace with your IAM Role ARN
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/githuboidc
           aws-region: ${{ env.AWS_REGION }}
 
-      # 4) ECR 로그인
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      # 5) 애플리케이션 빌드
       - name: Build with Gradle
         run: ./gradlew clean build
 
-      # 6) Docker 이미지 빌드·태그·푸시
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG:    ${{ github.sha }}
+          IMAGE_TAG: ${{ github.sha }}
           SERVICE_PATH: .
         run: |
           docker build -t $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG $SERVICE_PATH
           docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      # 7) 기존 Task Definition 조회 및 새 이미지로 업데이트
       - name: Register new task definition
         id: register-task-def
         run: |
-          # 기존 task definition 조회
           aws ecs describe-task-definition \
             --task-definition ${{ env.ECS_TASK_DEFINITION }} \
             --query 'taskDefinition' \
             --output json > task-definition.json
-          
-          # 불필요한 필드 제거 및 이미지 업데이트
-          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) | 
+
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
               .containerDefinitions[0].image = "${{ steps.build-image.outputs.image }}"' \
               task-definition.json > new-task-definition.json
-          
-          # 새 task definition 등록
+
           TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://new-task-definition.json \
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
           echo "task_def_arn=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
 
-      # 8) ECS 서비스 업데이트 (Built-in Blue/Green 트리거)
       - name: Update ECS service
         run: |
           aws ecs update-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service ${{ env.ECS_SERVICE }} \
-            --task-definition ${{ steps.register-task-def.outputs.task_def_arn }}
+            --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
+            --force-new-deployment > /dev/null
+
+          echo "블루/그린 배포가 시작되었습니다."
+
+      - name: 블루/그린 배포 상태 모니터링
+        run: |
+          echo "블루/그린 배포 상태를 모니터링합니다..."
+          echo "예상 소요 시간: Health Check Grace Period(5분) + Bake Time(3분) + 여유 시간"
+
+          MAX_ATTEMPTS=90
+          ATTEMPT=0
+          POLL_INTERVAL=10
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "[$ATTEMPT/$MAX_ATTEMPTS] 상태 확인 중..."
+
+            DEPLOYMENTS=$(aws ecs describe-services \
+              --cluster ${{ env.ECS_CLUSTER }} \
+              --services ${{ env.ECS_SERVICE }} \
+              --query 'services[0].deployments' \
+              --output json)
+
+            DEPLOYMENT_COUNT=$(echo $DEPLOYMENTS | jq 'length')
+            PRIMARY_STATUS=$(echo $DEPLOYMENTS | jq -r '.[] | select(.status == "PRIMARY") | .rolloutState // "UNKNOWN"')
+            PRIMARY_RUNNING=$(echo $DEPLOYMENTS | jq -r '.[] | select(.status == "PRIMARY") | .runningCount')
+            PRIMARY_DESIRED=$(echo $DEPLOYMENTS | jq -r '.[] | select(.status == "PRIMARY") | .desiredCount')
+
+            echo "  배포 개수: $DEPLOYMENT_COUNT | 상태: $PRIMARY_STATUS | 태스크: $PRIMARY_RUNNING/$PRIMARY_DESIRED"
+
+            if [ "$PRIMARY_STATUS" = "COMPLETED" ] && [ "$DEPLOYMENT_COUNT" -eq 1 ]; then
+              echo "블루/그린 배포가 성공적으로 완료되었습니다!"
+              exit 0
+            fi
+
+            if [ "$PRIMARY_STATUS" = "FAILED" ]; then
+              echo "::error::배포 실패! 롤백이 진행되었습니다."
+              aws ecs describe-services \
+                --cluster ${{ env.ECS_CLUSTER }} \
+                --services ${{ env.ECS_SERVICE }} \
+                --query 'services[0].events[:5].[createdAt,message]' \
+                --output table
+              exit 1
+            fi
+
+            sleep $POLL_INTERVAL
+          done
+
+          echo "::error::타임아웃 - 배포가 15분 내에 완료되지 않았습니다."
+          exit 1
+
+      - name: 배포 결과 요약
+        if: always()
+        run: |
+          SERVICE_INFO=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query 'services[0]' \
+            --output json 2>/dev/null) || true
+
+          if [ -n "$SERVICE_INFO" ]; then
+            RUNNING=$(echo $SERVICE_INFO | jq -r '.runningCount')
+            DESIRED=$(echo $SERVICE_INFO | jq -r '.desiredCount')
+            ROLLOUT_STATE=$(echo $SERVICE_INFO | jq -r '.deployments[0].rolloutState // "N/A"')
+
+            echo "## 배포 완료 (Blue/Green)" >> $GITHUB_STEP_SUMMARY
+            echo "| 항목 | 값 |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
+            echo "| 클러스터 | ${{ env.ECS_CLUSTER }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| 서비스 | ${{ env.ECS_SERVICE }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| 이미지 | ${{ steps.build-image.outputs.image }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| 태스크 | $RUNNING / $DESIRED |" >> $GITHUB_STEP_SUMMARY
+            echo "| 롤아웃 상태 | $ROLLOUT_STATE |" >> $GITHUB_STEP_SUMMARY
+            echo "| 시간 | $(date -u '+%Y-%m-%d %H:%M:%S UTC') |" >> $GITHUB_STEP_SUMMARY
+          fi
