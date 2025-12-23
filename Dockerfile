@@ -3,7 +3,7 @@
 ###############################
 
 # Use a minimal OpenJDK runtime as base image
-FROM openjdk:17-jdk-slim
+FROM eclipse-temurin:17-jdk-alpine
 
 # Optional: create a non-root user to run the application
 # RUN addgroup --system spring && adduser --system --ingroup spring spring
